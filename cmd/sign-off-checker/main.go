@@ -36,6 +36,13 @@ func init() {
 	testRE = regexp.MustCompile(`(?mi)^signed-off-by:`)
 }
 
+func loggingMiddleware(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s %s", r.RemoteAddr, r.Method, r.URL)
+		handler.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	secretString, _ := os.LookupEnv("SHARED_SECRET")
 	if secretString == "" {
@@ -54,7 +61,8 @@ func main() {
 	tc := oauth2.NewClient(oauth2.NoContext, ts)
 	client = github.NewClient(tc)
 
-	http.HandleFunc("/webhook", HandleHook)
+	log.Print("Starting serving /webhook on :8080")
+	http.Handle("/webhook", loggingMiddleware(http.HandlerFunc(HandleHook)))
 	err := http.ListenAndServe(":8080", nil)
 	log.Fatal(err)
 }
