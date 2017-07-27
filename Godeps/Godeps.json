@@ -1,14 +1,14 @@
 {
 	"ImportPath": "github.com/heptio/sign-off-checker",
-	"GoVersion": "go1.7",
-	"GodepVersion": "v75",
+	"GoVersion": "go1.8",
+	"GodepVersion": "v79",
 	"Packages": [
-		"./cmd/..."
+		"./..."
 	],
 	"Deps": [
 		{
 			"ImportPath": "github.com/google/go-github/github",
-			"Rev": "0e7db468186d70bb8568a7e7322ba7eba6f7dd5d"
+			"Rev": "35d38108ba83757e9b6fc00e4ba7e2d597c651be"
 		},
 		{
 			"ImportPath": "github.com/google/go-querystring/query",
@@ -16,15 +16,19 @@
 		},
 		{
 			"ImportPath": "golang.org/x/net/context",
-			"Rev": "007e530097ad7f954752df63046b4036f98ba6a6"
+			"Rev": "186fd3fc8194a5e9980a82230d69c1ff7134229f"
+		},
+		{
+			"ImportPath": "golang.org/x/net/context/ctxhttp",
+			"Rev": "186fd3fc8194a5e9980a82230d69c1ff7134229f"
 		},
 		{
 			"ImportPath": "golang.org/x/oauth2",
-			"Rev": "314dd2c0bf3ebd592ec0d20847d27e79d0dbe8dd"
+			"Rev": "b53b38ad8a6435bd399ea76d0fa74f23149cca4e"
 		},
 		{
 			"ImportPath": "golang.org/x/oauth2/internal",
-			"Rev": "314dd2c0bf3ebd592ec0d20847d27e79d0dbe8dd"
+			"Rev": "b53b38ad8a6435bd399ea76d0fa74f23149cca4e"
 		}
 	]
 }
