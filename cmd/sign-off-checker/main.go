@@ -73,6 +73,7 @@ func HandleHook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w,
 			fmt.Sprintf("Could not validate signature: %v", err),
 			http.StatusBadRequest)
+		return
 	}
 
 	hooktype := github.WebHookType(r)
@@ -81,6 +82,7 @@ func HandleHook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w,
 			fmt.Sprintf("Error parsing payload: %v", err),
 			http.StatusBadRequest)
+		return
 	}
 	switch event := event.(type) {
 	case *github.PullRequestEvent:
