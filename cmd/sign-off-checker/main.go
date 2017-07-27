@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -100,7 +101,7 @@ func HandlePullRequest(event *github.PullRequestEvent) {
 	opt := &github.ListOptions{PerPage: 10}
 	allCommits := []*github.RepositoryCommit{}
 	for {
-		commits, resp, err := client.PullRequests.ListCommits(*owner, *repo, *number, opt)
+		commits, resp, err := client.PullRequests.ListCommits(context.TODO(), *owner, *repo, *number, opt)
 		if err != nil {
 			log.Printf("Error getting commits for PR: %v", err)
 			return
@@ -132,7 +133,7 @@ func HandlePullRequest(event *github.PullRequestEvent) {
 			status.Description = s("Commit has Signed-off-by")
 		}
 
-		_, _, err := client.Repositories.CreateStatus(*owner, *repo, *commit.SHA, &status)
+		_, _, err := client.Repositories.CreateStatus(context.TODO(), *owner, *repo, *commit.SHA, &status)
 		if err != nil {
 			log.Printf("Error setting status: %v", err)
 		}
