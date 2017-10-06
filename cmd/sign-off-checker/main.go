@@ -88,6 +88,7 @@ func HandleHook(w http.ResponseWriter, r *http.Request) {
 	switch event := event.(type) {
 	case *github.PullRequestEvent:
 		HandlePullRequest(event)
+	case *github.PingEvent:
 	default:
 		log.Printf("Unhandled hook type: %v", hooktype)
 	}
