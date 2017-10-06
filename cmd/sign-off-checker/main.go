@@ -25,6 +25,7 @@ import (
 	"regexp"
 
 	"github.com/google/go-github/github"
+	"github.com/heptio/sign-off-checker/pkg/constants"
 	"golang.org/x/oauth2"
 )
 
@@ -121,7 +122,7 @@ func HandlePullRequest(event *github.PullRequestEvent) {
 	for _, commit := range allCommits {
 		status := github.RepoStatus{}
 		status.TargetURL = github.String(fmt.Sprintf("https://github.com/%s/%s/blob/master/CONTRIBUTING.md", *owner, *repo))
-		status.Context = github.String("signed-off-by")
+		status.Context = github.String(constants.SignOffCheckerContext)
 		if signMissing {
 			status.State = github.String("failure")
 			status.Description = github.String("A commit in PR is missing Signed-off-by")
