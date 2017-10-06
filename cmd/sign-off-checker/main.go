@@ -120,14 +120,14 @@ func HandlePullRequest(event *github.PullRequestEvent) {
 
 	for _, commit := range allCommits {
 		status := github.RepoStatus{}
-		status.TargetURL = s(fmt.Sprintf("https://github.com/%s/%s/blob/master/CONTRIBUTING.md", *owner, *repo))
-		status.Context = s("signed-off-by")
+		status.TargetURL = github.String(fmt.Sprintf("https://github.com/%s/%s/blob/master/CONTRIBUTING.md", *owner, *repo))
+		status.Context = github.String("signed-off-by")
 		if signMissing {
-			status.State = s("failure")
-			status.Description = s("A commit in PR is missing Signed-off-by")
+			status.State = github.String("failure")
+			status.Description = github.String("A commit in PR is missing Signed-off-by")
 		} else {
-			status.State = s("success")
-			status.Description = s("Commit has Signed-off-by")
+			status.State = github.String("success")
+			status.Description = github.String("Commit has Signed-off-by")
 		}
 
 		_, _, err := client.Repositories.CreateStatus(context.TODO(), *owner, *repo, *commit.SHA, &status)
@@ -135,8 +135,4 @@ func HandlePullRequest(event *github.PullRequestEvent) {
 			log.Printf("Error setting status: %v", err)
 		}
 	}
-}
-
-func s(str string) *string {
-	return &str
 }
