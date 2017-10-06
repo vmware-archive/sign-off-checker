@@ -31,11 +31,7 @@ import (
 var client *github.Client
 var secret []byte
 
-var testRE *regexp.Regexp
-
-func init() {
-	testRE = regexp.MustCompile(`(?mi)^signed-off-by:`)
-}
+var testRE = regexp.MustCompile(`(?mi)^signed-off-by:`)
 
 func loggingMiddleware(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
