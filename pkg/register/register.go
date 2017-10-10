@@ -36,7 +36,7 @@ func Register(log *log.Logger, gh *github.Client, dryRun bool, organizations []s
 	}
 
 	for _, org := range organizations {
-		log.Printf("checking all repos in the %q organization", org)
+		log.Printf("Checking all repos in the %q organization", org)
 		repos, err := listOrgRepos(gh, org)
 		if err != nil {
 			return err
