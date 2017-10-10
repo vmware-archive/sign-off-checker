@@ -49,7 +49,6 @@ func hasSignOffHook(gh *github.Client, org string, repo *github.Repository, url 
 }
 
 func addSignOffHook(gh *github.Client, org string, repo *github.Repository, url string, secret string) error {
-	panic(nil)
 	hook := &github.Hook{
 		Name:   github.String("web"),
 		Events: []string{"pull_request"},
