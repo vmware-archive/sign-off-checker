@@ -26,7 +26,7 @@ import (
 	"regexp"
 
 	"github.com/google/go-github/github"
-	"github.com/heptio/sign-off-checker/pkg/constants"
+	"github.com/heptiolabs/sign-off-checker/pkg/constants"
 )
 
 // Handler is an http.Handler that handles GitHub pull_request hooks

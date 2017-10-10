@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/google/go-github/github"
-	"github.com/heptio/sign-off-checker/pkg/constants"
+	"github.com/heptiolabs/sign-off-checker/pkg/constants"
 )
 
 func hasBranchProtection(gh *github.Client, org string, repo *github.Repository) (bool, error) {

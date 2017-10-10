@@ -26,8 +26,8 @@ import (
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
 
-	"github.com/heptio/sign-off-checker/pkg/register"
-	"github.com/heptio/sign-off-checker/pkg/webhook"
+	"github.com/heptiolabs/sign-off-checker/pkg/register"
+	"github.com/heptiolabs/sign-off-checker/pkg/webhook"
 )
 
 // How often do we loop through and autoregister webhooks and branch protection configuration?

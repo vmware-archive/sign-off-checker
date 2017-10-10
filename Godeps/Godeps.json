@@ -1,5 +1,5 @@
 {
-	"ImportPath": "github.com/heptio/sign-off-checker",
+	"ImportPath": "github.com/heptiolabs/sign-off-checker",
 	"GoVersion": "go1.8",
 	"GodepVersion": "v79",
 	"Packages": [

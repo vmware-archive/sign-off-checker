@@ -6,7 +6,7 @@ The status check points to a "CONTRIBUTING.md" file in the repo in question.
 
 ## Building
 
-You can just `go get github.com/heptio/sign-off-checker/cmd/sign-off-checker` to get the binary installed locally.  To build a docker container do `make push REGISTRY=<my-gcr-registry>` from this repo.
+You can just `go get github.com/heptiolabs/sign-off-checker/cmd/sign-off-checker` to get the binary installed locally.  To build a docker container do `make push REGISTRY=<my-gcr-registry>` from this repo.
 
 ## Running
 There are two environment variables that need to be set when running:
