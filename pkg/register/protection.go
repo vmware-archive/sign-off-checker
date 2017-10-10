@@ -71,7 +71,7 @@ func addBranchProtection(gh *github.Client, org string, repo *github.Repository)
 				EnforceAdmins: true,
 				RequiredStatusChecks: &github.RequiredStatusChecks{
 					Strict:   false,
-					Contexts: []string{},
+					Contexts: []string{constants.SignOffCheckerContext},
 				},
 			})
 		if err != nil {
