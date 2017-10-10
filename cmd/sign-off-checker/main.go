@@ -74,6 +74,16 @@ func main() {
 	// start a background thread to autoregister immediately and then once every autoregisterInterval
 	go func() {
 		autoregisterLog := log.New(os.Stdout, "[register] ", log.Flags())
+
+		if len(autoRegisterOrgs) == 0 {
+			autoregisterLog.Printf("Automatic registration disabled (enable by setting AUTOREGISTER_ORGANIZATIONS)")
+			return
+		}
+
+		for _, org := range autoRegisterOrgs {
+			autoregisterLog.Printf("Enabling automatic registration for DCO repositories under https://github.com/%s", org)
+		}
+
 		immediate := make(chan struct{}, 1)
 		immediate <- struct{}{}
 		ticker := time.NewTicker(autoregisterInterval)
