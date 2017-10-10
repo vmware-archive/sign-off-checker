@@ -17,129 +17,192 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"regexp"
+	"time"
 
 	"github.com/google/go-github/github"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"golang.org/x/oauth2"
+
+	"github.com/heptiolabs/sign-off-checker/pkg/register"
+	"github.com/heptiolabs/sign-off-checker/pkg/webhook"
 )
 
-var client *github.Client
-var secret []byte
+// define these as flag keys as constants so a typo is more likely to be caught
+const (
+	flagAutoregister         = "autoregister"
+	flagAutoregisterInterval = "autoregister-interval"
+	flagPublicWebhookURL     = "public-webhook-url"
+	flagDryRun               = "dry-run"
+	flagListen               = "listen"
+	flagSharedSecret         = "shared-secret"
+	flagGithubToken          = "github-token"
+)
 
-var testRE *regexp.Regexp
+// CLI entrypoint
+func main() {
+	rootCmd := &cobra.Command{
+		Use:     "SHARED_SECRET='[...]' GITHUB_TOKEN='[...]' sign-off-checker",
+		Short:   "A GitHub integration to ensure commits have \"Signed-off-by\".",
+		Args:    cobra.NoArgs,
+		PreRunE: func(_ *cobra.Command, _ []string) error { return validate() },
+		RunE:    func(_ *cobra.Command, _ []string) error { return run() },
+	}
 
-func init() {
-	testRE = regexp.MustCompile(`(?mi)^signed-off-by:`)
+	// bind parameters from environment variables (secrets)
+	viper.BindEnv(flagSharedSecret, "SHARED_SECRET")
+	viper.BindEnv(flagGithubToken, "GITHUB_TOKEN")
+
+	// bind parameters from command line flags
+	rootCmd.Flags().String(
+		flagListen,
+		":8080",
+		"Set HTTP listen `address`",
+	)
+	rootCmd.Flags().StringSlice(
+		flagAutoregister,
+		[]string{},
+		"Autoregister all DCO repositories under this `organization` (repeat to watch more than one organization)",
+	)
+	rootCmd.Flags().Duration(
+		flagAutoregisterInterval,
+		10*time.Minute,
+		"Rerun webhook and branch protection automatic registration every `interval`",
+	)
+	rootCmd.Flags().String(
+		flagPublicWebhookURL,
+		"",
+		"Set the public HTTPS URL of this server (required for automatic registration)",
+	)
+	rootCmd.Flags().Bool(
+		flagDryRun,
+		false,
+		"Do not change any webhook/branch configuration during automatic registration",
+	)
+	if err := viper.BindPFlags(rootCmd.Flags()); err != nil {
+		log.Fatalf("error binding flags: %v", err)
+	}
+
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
 
-func loggingMiddleware(handler http.Handler) http.Handler {
+// validate that all provided parameters are valid
+func validate() error {
+	valid := true
+	invalid := func(msg string, args ...interface{}) {
+		valid = false
+		fmt.Fprintf(os.Stderr, msg+"\n", args...)
+	}
+
+	if !viper.IsSet(flagSharedSecret) {
+		invalid("$SHARED_SECRET is not set")
+	}
+
+	if !viper.IsSet(flagGithubToken) {
+		invalid("$GITHUB_TOKEN is not set")
+	}
+
+	_, _, err := net.SplitHostPort(viper.GetString(flagListen))
+	if err != nil {
+		invalid("--%s is invalid (%v)", flagListen, err)
+	}
+
+	if viper.GetString(flagPublicWebhookURL) != "" {
+		url, err := url.ParseRequestURI(viper.GetString(flagPublicWebhookURL))
+		if err != nil {
+			invalid("--%s is invalid (%v)", flagPublicWebhookURL, err)
+		} else if url.Scheme != "https" {
+			invalid("--%s must be \"https://[...]\"", flagPublicWebhookURL)
+		}
+	} else if len(viper.GetStringSlice(flagAutoregister)) > 0 {
+		invalid("--%s must be set to use automatic registration", flagPublicWebhookURL)
+	}
+
+	if !valid {
+		fmt.Fprintf(os.Stderr, "\n")
+		return fmt.Errorf("invalid parameters")
+	}
+	return nil
+}
+
+// run the webhook server and autoregistration daemon
+func run() error {
+	gh := github.NewClient(
+		oauth2.NewClient(oauth2.NoContext,
+			oauth2.StaticTokenSource(
+				&oauth2.Token{AccessToken: viper.GetString(flagGithubToken)},
+			),
+		),
+	)
+
+	go autoregister(gh)
+
+	return serveWebhook(gh)
+}
+
+func autoregister(gh *github.Client) {
+	autoregisterLog := log.New(os.Stdout, "[register] ", log.Flags())
+
+	if len(viper.GetStringSlice(flagAutoregister)) == 0 {
+		autoregisterLog.Printf("Automatic registration disabled (enable with --%s)", flagAutoregister)
+		return
+	}
+	for _, org := range viper.GetStringSlice(flagAutoregister) {
+		autoregisterLog.Printf("Enabling automatic registration for DCO repositories under https://github.com/%s", org)
+	}
+
+	immediate := make(chan struct{}, 1)
+	immediate <- struct{}{}
+	ticker := time.NewTicker(viper.GetDuration(flagAutoregisterInterval))
+	for {
+		select {
+		case <-immediate:
+		case <-ticker.C:
+		}
+		start := time.Now()
+		err := register.Register(
+			autoregisterLog,
+			gh,
+			viper.GetBool(flagDryRun),
+			viper.GetStringSlice(flagAutoregister),
+			viper.GetString(flagPublicWebhookURL),
+			viper.GetString(flagSharedSecret),
+		)
+		duration := time.Since(start)
+		if err != nil {
+			autoregisterLog.Printf("Error after %s: %v", duration, err)
+		} else {
+			autoregisterLog.Printf("Finished in %s", duration)
+		}
+	}
+}
+
+func loggingMiddleware(log *log.Logger, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s %s", r.RemoteAddr, r.Method, r.URL)
 		handler.ServeHTTP(w, r)
 	})
 }
 
-func main() {
-	secretString, _ := os.LookupEnv("SHARED_SECRET")
-	if secretString == "" {
-		log.Fatal("SHARED_SECRET is not set")
-	}
-	secret = []byte(secretString)
-
-	token, _ := os.LookupEnv("GITHUB_TOKEN")
-	if token == "" {
-		log.Fatal("GITHUB_TOKEN is not set")
-	}
-
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	)
-	tc := oauth2.NewClient(oauth2.NoContext, ts)
-	client = github.NewClient(tc)
-
-	log.Print("Starting serving /webhook on :8080")
-	http.Handle("/webhook", loggingMiddleware(http.HandlerFunc(HandleHook)))
-	err := http.ListenAndServe(":8080", nil)
-	log.Fatal(err)
-}
-
-func HandleHook(w http.ResponseWriter, r *http.Request) {
-	payload, err := github.ValidatePayload(r, secret)
-	if err != nil {
-		http.Error(w,
-			fmt.Sprintf("Could not validate signature: %v", err),
-			http.StatusBadRequest)
-		return
-	}
-
-	hooktype := github.WebHookType(r)
-	event, err := github.ParseWebHook(hooktype, payload)
-	if err != nil {
-		http.Error(w,
-			fmt.Sprintf("Error parsing payload: %v", err),
-			http.StatusBadRequest)
-		return
-	}
-	switch event := event.(type) {
-	case *github.PullRequestEvent:
-		HandlePullRequest(event)
-	default:
-		log.Printf("Unhandled hook type: %v", hooktype)
-	}
-}
-
-func HandlePullRequest(event *github.PullRequestEvent) {
-	owner := event.Repo.Owner.Login
-	repo := event.Repo.Name
-	number := event.Number
-
-	opt := &github.ListOptions{PerPage: 10}
-	allCommits := []*github.RepositoryCommit{}
-	for {
-		commits, resp, err := client.PullRequests.ListCommits(context.TODO(), *owner, *repo, *number, opt)
-		if err != nil {
-			log.Printf("Error getting commits for PR: %v", err)
-			return
-		}
-		allCommits = append(allCommits, commits...)
-		if resp.NextPage == 0 {
-			break
-		}
-		opt.Page = resp.NextPage
-	}
-
-	signMissing := false
-	for _, commit := range allCommits {
-		if !testRE.MatchString(*commit.Commit.Message) {
-			signMissing = true
-			break
-		}
-	}
-
-	for _, commit := range allCommits {
-		status := github.RepoStatus{}
-		status.TargetURL = s(fmt.Sprintf("https://github.com/%s/%s/blob/master/CONTRIBUTING.md", *owner, *repo))
-		status.Context = s("signed-off-by")
-		if signMissing {
-			status.State = s("failure")
-			status.Description = s("A commit in PR is missing Signed-off-by")
-		} else {
-			status.State = s("success")
-			status.Description = s("Commit has Signed-off-by")
-		}
-
-		_, _, err := client.Repositories.CreateStatus(context.TODO(), *owner, *repo, *commit.SHA, &status)
-		if err != nil {
-			log.Printf("Error setting status: %v", err)
-		}
-	}
-}
-
-func s(str string) *string {
-	return &str
+func serveWebhook(gh *github.Client) error {
+	// start the HTTP webhook listener
+	webhookLog := log.New(os.Stdout, "[webhook] ", log.Flags())
+	webhookLog.Printf("Serving /webhook on %s", viper.GetString(flagListen))
+	mux := http.NewServeMux()
+	mux.Handle("/webhook", &webhook.Handler{
+		Secret: []byte(viper.GetString(flagSharedSecret)),
+		GitHub: gh,
+		Log:    webhookLog,
+	})
+	return http.ListenAndServe(
+		viper.GetString(flagListen),
+		loggingMiddleware(webhookLog, mux))
 }

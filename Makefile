@@ -16,7 +16,7 @@
 BIN := sign-off-checker
 
 # This repo's root import path (under GOPATH).
-PKG := github.com/heptio/sign-off-checker
+PKG := github.com/heptiolabs/sign-off-checker
 
 # Where to push the docker image.
 REGISTRY ?= gcr.io/heptio-prod
