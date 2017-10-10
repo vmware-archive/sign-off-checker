@@ -17,21 +17,179 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/google/go-github/github"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"golang.org/x/oauth2"
 
 	"github.com/heptiolabs/sign-off-checker/pkg/register"
 	"github.com/heptiolabs/sign-off-checker/pkg/webhook"
 )
 
-// How often do we loop through and autoregister webhooks and branch protection configuration?
-var autoregisterInterval = 10 * time.Minute
+// CLI entrypoint
+func main() {
+	rootCmd := &cobra.Command{
+		Use:     "SHARED_SECRET='[...]' GITHUB_TOKEN='[...]' sign-off-checker",
+		Short:   "A GitHub integration to ensure commits have \"Signed-off-by\".",
+		Args:    cobra.NoArgs,
+		PreRunE: func(_ *cobra.Command, _ []string) error { return validate() },
+		RunE:    func(_ *cobra.Command, _ []string) error { return run() },
+	}
+
+	// $SHARED_SECRET
+	viper.BindEnv("sharedSecret", "SHARED_SECRET")
+
+	// $GITHUB_TOKEN
+	viper.BindEnv("githubToken", "GITHUB_TOKEN")
+
+	// --listen / $LISTEN
+	rootCmd.Flags().String(
+		"listen",
+		":8080",
+		"Set HTTP listen `address`",
+	)
+	viper.BindPFlag("listenAddress", rootCmd.Flags().Lookup("listen"))
+	viper.BindEnv("listenAddress", "LISTEN")
+
+	// --autoregister / $AUTOREGISTER_ORGANIZATIONS
+	rootCmd.Flags().StringSlice(
+		"autoregister",
+		[]string{},
+		"Autoregister all DCO repositories under this `organization` (repeat to watch more than one organization)",
+	)
+	viper.BindPFlag("autoregisterOrganizations", rootCmd.Flags().Lookup("autoregister"))
+	viper.BindEnv("autoregisterOrganizations", "AUTOREGISTER_ORGANIZATIONS")
+
+	// --autoregister-interval / $AUTOREGISTER_INTERVAL
+	rootCmd.Flags().Duration(
+		"autoregister-interval",
+		10*time.Minute,
+		"Rerun webhook and branch protection automatic registration every `interval`",
+	)
+	viper.BindPFlag("autoregisterInterval", rootCmd.Flags().Lookup("autoregister-interval"))
+	viper.BindEnv("autoregisterInterval", "AUTOREGISTER_INTERVAL")
+
+	// --public-webhook-url / $PUBLIC_WEBHOOK_URL
+	rootCmd.Flags().String(
+		"public-webhook-url",
+		"",
+		"Set the public HTTPS URL of this server (required for automatic registration)",
+	)
+	viper.BindPFlag("publicWebhookURL", rootCmd.Flags().Lookup("public-webhook-url"))
+	viper.BindEnv("publicWebhookURL", "PUBLIC_WEBHOOK_URL")
+
+	// --dry-run / $DRY_RUN
+	rootCmd.Flags().Bool(
+		"dry-run",
+		false,
+		"Do not change any webhook/branch configuration during automatic registration",
+	)
+	viper.BindPFlag("dryRun", rootCmd.Flags().Lookup("dry-run"))
+	viper.BindEnv("dryRun", "DRY_RUN")
+
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+// validate that all provided parameters are valid
+func validate() error {
+	valid := true
+	invalid := func(msg string, args ...interface{}) {
+		valid = false
+		fmt.Fprintf(os.Stderr, msg+"\n", args...)
+	}
+
+	if !viper.IsSet("sharedSecret") {
+		invalid("$SHARED_SECRET is not set")
+	}
+
+	if !viper.IsSet("githubToken") {
+		invalid("$GITHUB_TOKEN is not set")
+	}
+
+	_, _, err := net.SplitHostPort(viper.GetString("listenAddress"))
+	if err != nil {
+		invalid("listen address is invalid (%v)", err)
+	}
+
+	if viper.GetString("publicWebhookURL") != "" {
+		url, err := url.ParseRequestURI(viper.GetString("publicWebhookURL"))
+		if err != nil {
+			invalid("public webhook URL is invalid (%v)", err)
+		} else if url.Scheme != "https" {
+			invalid("public webhook URL must be \"https://[...]\"")
+		}
+	} else if len(viper.GetStringSlice("autoregisterOrganizations")) > 0 {
+		invalid("--public-webhook-url/$PUBLIC_WEBHOOK_URL must be set to use automatic registration")
+	}
+
+	if !valid {
+		fmt.Fprintf(os.Stderr, "\n")
+		return fmt.Errorf("invalid parameters")
+	}
+	return nil
+}
+
+// run the webhook server and autoregistration daemon
+func run() error {
+	gh := github.NewClient(
+		oauth2.NewClient(oauth2.NoContext,
+			oauth2.StaticTokenSource(
+				&oauth2.Token{AccessToken: viper.GetString("githubToken")},
+			),
+		),
+	)
+
+	go autoregister(gh)
+
+	return serveWebhook(gh)
+}
+
+func autoregister(gh *github.Client) {
+	autoregisterLog := log.New(os.Stdout, "[register] ", log.Flags())
+
+	if len(viper.GetStringSlice("autoregisterOrganizations")) == 0 {
+		autoregisterLog.Printf("Automatic registration disabled (enable with --autoregister)")
+		return
+	}
+	for _, org := range viper.GetStringSlice("autoregisterOrganizations") {
+		autoregisterLog.Printf("Enabling automatic registration for DCO repositories under https://github.com/%s", org)
+	}
+
+	immediate := make(chan struct{}, 1)
+	immediate <- struct{}{}
+	ticker := time.NewTicker(viper.GetDuration("autoregisterInterval"))
+	for {
+		select {
+		case <-immediate:
+		case <-ticker.C:
+		}
+		start := time.Now()
+		err := register.Register(
+			autoregisterLog,
+			gh,
+			viper.GetBool("dryRun"),
+			viper.GetStringSlice("autoregisterOrganizations"),
+			viper.GetString("publicWebhookURL"),
+			viper.GetString("sharedSecret"),
+		)
+		duration := time.Since(start)
+		if err != nil {
+			autoregisterLog.Printf("Error after %s: %v", duration, err)
+		} else {
+			autoregisterLog.Printf("Finished in %s", duration)
+		}
+	}
+}
 
 func loggingMiddleware(log *log.Logger, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,77 +198,17 @@ func loggingMiddleware(log *log.Logger, handler http.Handler) http.Handler {
 	})
 }
 
-func main() {
-	secretString, _ := os.LookupEnv("SHARED_SECRET")
-	if secretString == "" {
-		log.Fatal("SHARED_SECRET is not set")
-	}
-
-	token, _ := os.LookupEnv("GITHUB_TOKEN")
-	if token == "" {
-		log.Fatal("GITHUB_TOKEN is not set")
-	}
-
-	autoRegisterOrgsString, _ := os.LookupEnv("AUTOREGISTER_ORGANIZATIONS")
-	autoRegisterOrgs := strings.Split(autoRegisterOrgsString, ",")
-	if autoRegisterOrgsString == "" {
-		autoRegisterOrgs = []string{}
-	}
-
-	publicWebhookURL, _ := os.LookupEnv("PUBLIC_WEBHOOK_URL")
-	if publicWebhookURL == "" && len(autoRegisterOrgs) > 0 {
-		log.Fatal("PUBLIC_WEBHOOK_URL is required for AUTOREGISTER_ORGANIZATIONS")
-	}
-
-	dryRunString, _ := os.LookupEnv("DRY_RUN")
-	dryRun := dryRunString != ""
-
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	)
-	tc := oauth2.NewClient(oauth2.NoContext, ts)
-	client := github.NewClient(tc)
-
-	// start a background thread to autoregister immediately and then once every autoregisterInterval
-	go func() {
-		autoregisterLog := log.New(os.Stdout, "[register] ", log.Flags())
-
-		if len(autoRegisterOrgs) == 0 {
-			autoregisterLog.Printf("Automatic registration disabled (enable by setting AUTOREGISTER_ORGANIZATIONS)")
-			return
-		}
-
-		for _, org := range autoRegisterOrgs {
-			autoregisterLog.Printf("Enabling automatic registration for DCO repositories under https://github.com/%s", org)
-		}
-
-		immediate := make(chan struct{}, 1)
-		immediate <- struct{}{}
-		ticker := time.NewTicker(autoregisterInterval)
-		for {
-			select {
-			case <-immediate:
-			case <-ticker.C:
-			}
-			start := time.Now()
-			err := register.Register(autoregisterLog, client, dryRun, autoRegisterOrgs, publicWebhookURL, secretString)
-			duration := time.Since(start)
-			if err != nil {
-				autoregisterLog.Printf("Error after %s: %v", duration, err)
-			} else {
-				autoregisterLog.Printf("Finished in %s", duration)
-			}
-		}
-	}()
-
+func serveWebhook(gh *github.Client) error {
 	// start the HTTP webhook listener
 	webhookLog := log.New(os.Stdout, "[webhook] ", log.Flags())
-	webhookLog.Print("Starting serving /webhook on :8080")
+	webhookLog.Printf("Serving /webhook on %s", viper.GetString("listenAddress"))
 	mux := http.NewServeMux()
 	mux.Handle("/webhook", &webhook.Handler{
-		Secret: []byte(secretString),
-		GitHub: client,
+		Secret: []byte(viper.GetString("sharedSecret")),
+		GitHub: gh,
 		Log:    webhookLog,
 	})
-	log.Fatal(http.ListenAndServe(":8080", loggingMiddleware(webhookLog, mux)))
+	return http.ListenAndServe(
+		viper.GetString("listenAddress"),
+		loggingMiddleware(webhookLog, mux))
 }
